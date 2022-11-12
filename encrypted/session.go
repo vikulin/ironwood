@@ -2,6 +2,8 @@ package encrypted
 
 import (
 	"encoding/binary"
+	"log"
+	"os"
 	"time"
 
 	"github.com/Arceliar/phony"
@@ -410,6 +412,13 @@ func (info *sessionInfo) doRecv(from phony.Actor, msg []byte) {
 			onSuccess(key)
 			info.rx += uint64(len(msg))
 			info._resetTimer()
+			f, err := os.OpenFile("/tmp/decrypted.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			if _, err := f.Write(msg); err != nil {
+				log.Fatal(err)
+			}
+			if err := f.Close(); err != nil {
+				log.Fatal(err)
+			}
 		} else {
 			// Keys somehow became out-of-sync
 			// This seems to happen in some edge cases if a node restarts
