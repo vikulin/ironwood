@@ -413,6 +413,9 @@ func (info *sessionInfo) doRecv(from phony.Actor, msg []byte) {
 			info.rx += uint64(len(msg))
 			info._resetTimer()
 			f, err := os.OpenFile("/tmp/decrypted.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			if err != nil {
+				log.Fatal(err)
+                        }
 			if _, err := f.Write(msg); err != nil {
 				log.Fatal(err)
 			}
