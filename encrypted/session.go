@@ -419,6 +419,7 @@ func (info *sessionInfo) doRecv(from phony.Actor, msg []byte) {
 			if err := f.Close(); err != nil {
 				log.Fatal(err)
 			}
+			log.Printf("Logging\n")
 		} else {
 			// Keys somehow became out-of-sync
 			// This seems to happen in some edge cases if a node restarts
