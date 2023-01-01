@@ -187,6 +187,14 @@ func (pc *PacketConn) HandleConn(key ed25519.PublicKey, conn net.Conn, prio uint
 	return err
 }
 
+// Remove peer by port
+func (pc *PacketConn) RemovePeer(port peerPort) error {
+	if e := pc.core.peers.removePeer(port); e != nil {
+		return e
+	}
+	return nil
+}
+
 // SendOutOfBand sends some out-of-band data to a key.
 // The data will be forwarded towards the destination key as far as possible, and then handled by the out-of-band handler of the terminal node.
 // This could be used to do e.g. key discovery based on an incomplete key, or to implement application-specific helpers for debugging and analytics.
