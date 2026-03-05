@@ -23,6 +23,7 @@ type peers struct {
 	core        *core
 	ports       map[peerPort]struct{}
 	peers       map[types.Name]map[*peer]struct{}
+	order       uint64 // global counter for (*peer).order
 }
 
 func (ps *peers) init(c *core) {
@@ -71,7 +72,8 @@ func (ps *peers) addPeer(domain types.Domain, conn net.Conn, prio uint8) (*peer,
 		p.monitor.pDelay = ps.core.config.peerTimeout // It doesn't make sense to start the ping delay any shorter than this
 		p.writer.peer = p
 		p.writer.wbuf = bufio.NewWriter(p.conn)
-		p.time = time.Now()
+		p.order = ps.order
+		ps.order++
 		ps.peers[p.domain.Name][p] = struct{}{}
 	})
 	return p, err
@@ -103,7 +105,7 @@ type peer struct {
 	port        peerPort
 	prio        uint8
 	queue       packetQueue
-	time        time.Time // time when the peer was initialized
+	order       uint64 // order in which peers were connected (relative uptime)
 	monitor     peerMonitor
 	writer      peerWriter
 	ready       bool // is the writer ready for traffic?
