@@ -32,7 +32,7 @@ func (ps *peers) init(c *core) {
 	ps.peers = make(map[types.Name]map[*peer]struct{})
 }
 
-func (ps *peers) addPeer(domain types.Domain, conn net.Conn, prio uint8) (*peer, error) {
+func (ps *peers) addPeer(domain types.Domain, conn net.Conn, cost, prio uint8) (*peer, error) {
 	var p *peer
 	var err error
 	ps.core.pconn.closeMutex.Lock()
@@ -67,6 +67,7 @@ func (ps *peers) addPeer(domain types.Domain, conn net.Conn, prio uint8) (*peer,
 		p.done = make(chan struct{})
 		p.domain = domain
 		p.port = port
+		p.cost = cost
 		p.prio = prio
 		p.monitor.peer = p
 		p.monitor.pDelay = ps.core.config.peerTimeout // It doesn't make sense to start the ping delay any shorter than this
@@ -103,6 +104,7 @@ type peer struct {
 	done        chan struct{}
 	domain      types.Domain
 	port        peerPort
+	cost        uint8
 	prio        uint8
 	queue       packetQueue
 	order       uint64 // order in which peers were connected (relative uptime)

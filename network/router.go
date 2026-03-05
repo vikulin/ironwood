@@ -667,29 +667,59 @@ func (r *router) _lookup(path []peerPort, watermark *uint64) *peer {
 			return nil
 		}
 	}
-	tiebreak := func(key types.Domain) bool {
-		// If distances match, keep the peer with the lowest key, just so there's some kind of consistency
-		return bestPeer != nil && key.TreeLess(bestPeer.domain)
-	}
+	// Firstly work out which of the peers take us closer to the destination,
+	// ignoring the link costs altogether, to guarantee loop-free next-hops.
+	// TODO: Over 1024 peers, this may reallocate and escape to the heap.
+	var _candidates [1024]*peer
+	candidates := _candidates[:0]
 	for _, ps := range r.peers {
-		if dist := r._getDist(path, ps.domain); dist < bestDist || (dist == bestDist && tiebreak(ps.domain)) {
+		dist := r._getDist(path, ps.domain)
+		if dist < bestDist {
+			bestDist = dist
+			candidates = candidates[:0]
 			for p := range ps.peers {
-				// Set the next hop to any peer object for this peer
-				bestPeer = p
-				bestDist = dist
-				break
+				candidates = append(candidates, p)
+			}
+		} else if dist == bestDist {
+			for p := range ps.peers {
+				candidates = append(candidates, p)
 			}
 		}
 	}
-	if bestPeer != nil {
-		for p := range r.peers[bestPeer.domain.Name].peers {
-			// Find the best peer object for this peer
-			switch {
-			case p.prio < bestPeer.prio:
-				bestPeer = p // Better priority
-			case p.prio == bestPeer.prio && p.order < bestPeer.order:
-				bestPeer = p // Up for longer
-			}
+	// Then take a look at the candidates and work out which is the best
+	// tree distance, accounting for the link cost.
+	bestPeer = nil
+	bestDist = ^uint64(0)
+	tiebreak := func(key types.Domain) bool {
+		// If distances match, keep the peer with the lowest key, just so
+		// there's some kind of consistency
+		return bestPeer != nil && key.TreeLess(bestPeer.domain)
+	}
+	for _, p := range candidates {
+		dist := r._getDist(path, p.domain) + uint64(p.cost)
+		switch {
+		case bestPeer == nil:
+			fallthrough
+		case dist < bestDist, dist == bestDist && tiebreak(p.domain):
+			// We're either closer to the destination, or we're the same
+			// distance but we've selected the lower key for consistency.
+			bestPeer = p
+			bestDist = dist
+		case dist > bestDist:
+			// This is here so that by the next case, dist == bestDist.
+			continue
+		case p.prio < bestPeer.prio:
+			// Next, select the link with the lowest priority.
+			bestPeer = p
+			bestDist = dist
+		case p.prio > bestPeer.prio:
+			// This is here so that by the next case, p.prio == bestPeer.prio.
+			continue
+		case p.order < bestPeer.order:
+			// Next, if the priority is equal, select the link that has been
+			// up the longest.
+			bestPeer = p
+			bestDist = dist
 		}
 	}
 	return bestPeer

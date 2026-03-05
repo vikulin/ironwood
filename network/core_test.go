@@ -27,8 +27,8 @@ func TestTwoNodes(t *testing.T) {
 	cA, cB := newDummyConn(pubA, pubB)
 	defer cA.Close()
 	defer cB.Close()
-	go a.HandleConn(dB, cA, 0)
-	go b.HandleConn(dA, cB, 0)
+	go a.HandleConn(dB, cA, 0, 0)
+	go b.HandleConn(dA, cB, 0, 0)
 	waitForRoot([]*PacketConn{a, b}, 30*time.Second)
 	timer := time.NewTimer(6 * time.Second)
 	defer func() { timer.Stop() }()
@@ -106,11 +106,11 @@ func TestLineNetwork(t *testing.T) {
 		defer linkB.Close()
 		go func() {
 			<-wait
-			prev.HandleConn(keyB, linkA, 0)
+			prev.HandleConn(keyB, linkA, 0, 0)
 		}()
 		go func() {
 			<-wait
-			here.HandleConn(keyA, linkB, 0)
+			here.HandleConn(keyA, linkB, 0, 0)
 		}()
 	}
 	close(wait)
@@ -207,11 +207,11 @@ func TestRandomTreeNetwork(t *testing.T) {
 			defer linkB.Close()
 			go func() {
 				<-wait
-				conn.HandleConn(b, linkA, 0)
+				conn.HandleConn(b, linkA, 0, 0)
 			}()
 			go func() {
 				<-wait
-				p.HandleConn(a, linkB, 0)
+				p.HandleConn(a, linkB, 0, 0)
 			}()
 		}
 		conns = append(conns, conn)

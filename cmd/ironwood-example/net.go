@@ -151,7 +151,7 @@ func handleTCP(pc iwt.PacketConn, conn net.Conn) {
 	}
 	ip := net.IP(addrBytes)
 	fmt.Println("Connected to", ip.String())
-	if err := pc.HandleConn(there, conn, 0); err != nil {
+	if err := pc.HandleConn(there, conn, 0, 0); err != nil {
 		fmt.Println("Disconnected from", ip.String(), "due to:", err)
 	} else {
 		fmt.Println("Disconnected from", ip.String())
