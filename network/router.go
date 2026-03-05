@@ -288,7 +288,7 @@ func (r *router) _fix() {
 		} else if !pRoot.Equal(bestRoot) {
 			continue // wrong root
 		}
-		if (r.refresh || !bestParent.Equal(self.parent)) && cost < bestCost {
+		if (r.refresh && cost*2 < bestCost) || (bestParent != self.parent && cost < bestCost) {
 			// It's time to refresh our self info
 			// If we're going to change to a better parent, now seems like the time...
 			bestRoot, bestParent, bestCost = pRoot, v.domain, cost
