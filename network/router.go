@@ -232,12 +232,21 @@ func (r *router) _updateAncestries() {
 func (r *router) _fix() {
 	bestRoot := r.core.crypto.Domain
 	bestParent := r.core.crypto.Domain
+	bestCost := ^uint64(0)
 	self := r.infos[r.core.crypto.Domain.Name]
 	// Check if our current parent leads to a better root than ourself
 	if _, isIn := r.peers[self.parent.Name]; isIn {
-		root, _ := r._getRootAndDists(r.core.crypto.Domain)
+		root, dists := r._getRootAndDists(r.core.crypto.Domain)
 		if root.TreeLess(bestRoot) {
-			bestRoot, bestParent = root, self.parent
+			cost := ^uint64(0)
+			for p := range r.peers[self.parent.Name].peers {
+				// Use the path to the root as our benchmark for parent selection
+				c := dists[root.Name] * r.costs[p]
+				if c < cost {
+					cost = c
+				}
+			}
+			bestRoot, bestParent, bestCost = root, self.parent, cost
 		}
 	}
 	// Check if we know a better root/parent
@@ -251,15 +260,23 @@ func (r *router) _fix() {
 			// This would loop through us already
 			continue
 		}
+		cost := ^uint64(0)
+		for p := range r.peers[pk].peers {
+			// Use the path to the root as our benchmark for parent selection
+			c := pDists[pRoot.Name] * r.costs[p]
+			if c < cost {
+				cost = c
+			}
+		}
 		if pRoot.TreeLess(bestRoot) {
-			bestRoot, bestParent = pRoot, v.domain
+			bestRoot, bestParent, bestCost = pRoot, v.domain, cost
 		} else if !pRoot.Equal(bestRoot) {
 			continue // wrong root
 		}
-		if (r.refresh || !bestParent.Equal(self.parent)) && r.resSeqs[pk] < r.resSeqs[bestParent.Name] {
+		if (r.refresh || !bestParent.Equal(self.parent)) && cost < bestCost {
 			// It's time to refresh our self info
 			// If we're going to change to a better parent, now seems like the time...
-			bestRoot, bestParent = pRoot, v.domain
+			bestRoot, bestParent, bestCost = pRoot, v.domain, cost
 		}
 	}
 	if r.refresh || r.doRoot1 || r.doRoot2 || !self.parent.Equal(bestParent) {
