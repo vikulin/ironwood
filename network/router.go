@@ -57,8 +57,8 @@ type router struct {
 	infos      map[types.Name]routerInfo
 	timers     map[types.Name]*time.Timer
 	ancs       map[types.Name][]types.Domain // Peer ancestry info
-	ancSeqs    map[types.Name]uint64
-	ancSeqCtr  uint64
+	//ancSeqs   map[types.Name]uint64
+	//ancSeqCtr uint64
 	cache      map[types.Name][]peerPort // Cache path slice for each peer
 	requests   map[types.Name]routerSigReq
 	responses  map[types.Name]routerDomainSigRes
@@ -80,7 +80,7 @@ func (r *router) init(c *core) {
 	r.infos = make(map[types.Name]routerInfo)
 	r.timers = make(map[types.Name]*time.Timer)
 	r.ancs = make(map[types.Name][]types.Domain)
-	r.ancSeqs = make(map[types.Name]uint64)
+	//r.ancSeqs = make(map[types.Name]uint64)
 	r.cache = make(map[types.Name][]peerPort)
 	r.requests = make(map[types.Name]routerSigReq)
 	r.responses = make(map[types.Name]routerDomainSigRes)
@@ -131,7 +131,7 @@ func (r *router) addPeer(from phony.Actor, p *peer) {
 			}
 			r.sent[p.domain.Name] = make(map[types.Name]types.Domain)
 			r.ports[p.port] = p.domain.Name
-			r.ancSeqs[p.domain.Name] = r.ancSeqCtr
+			//r.ancSeqs[p.domain.Name] = r.ancSeqCtr
 			r.blooms._addInfo(p.domain.Name)
 		} else {
 			// Send anything we've already sent over previous peer connections to this node
@@ -174,7 +174,7 @@ func (r *router) removePeer(from phony.Actor, p *peer) {
 			delete(r.responses, p.domain.Name)
 			delete(r.resSeqs, p.domain.Name)
 			delete(r.ancs, p.domain.Name)
-			delete(r.ancSeqs, p.domain.Name)
+			//delete(r.ancSeqs, p.domain.Name)
 			delete(r.cache, p.domain.Name)
 			r.blooms._removeInfo(p.domain.Name)
 			//r._fix()
@@ -213,7 +213,7 @@ func (r *router) _sendReqs() {
 }
 
 func (r *router) _updateAncestries() {
-	r.ancSeqCtr++
+	//r.ancSeqCtr++
 	for pkey, v := range r.peers {
 		anc := r._getAncestry(v.domain)
 		old := r.ancs[pkey]
@@ -230,7 +230,7 @@ func (r *router) _updateAncestries() {
 		}
 		if diff {
 			r.ancs[pkey] = anc
-			r.ancSeqs[pkey] = r.ancSeqCtr
+			//r.ancSeqs[pkey] = r.ancSeqCtr
 		}
 	}
 }
@@ -267,7 +267,7 @@ func (r *router) _fix() {
 			// If we're going to change to a better parent, now seems like the time...
 			bestRoot, bestParent = pRoot, v.domain
 		}
-		continue // Skip the rest for now, not sure how to handle stability...
+		/*
 		if r.ancSeqs[pk] < r.ancSeqs[bestParent.Name] {
 			// This node is advertising a more stable path, so we should probably switch to it...
 			bestRoot, bestParent = pRoot, v.domain
@@ -283,6 +283,7 @@ func (r *router) _fix() {
 				bestRoot, bestParent = pRoot, v.domain
 			}
 		}
+		*/
 	}
 	/*
 		if r.refresh || !bestParent.Equal(self.parent) {
