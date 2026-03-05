@@ -146,13 +146,11 @@ func (r *router) addPeer(from phony.Actor, p *peer) {
 			domain: p.domain,
 		}
 
-		if _, isIn := r.responses[p.domain.Name]; !isIn {
-			if _, isIn := r.requests[p.domain.Name]; !isIn {
-				r.requests[p.domain.Name] = *r._newReq()
-			}
-			req := r.requests[p.domain.Name]
-			p.sendSigReq(r, &req)
+		if _, isIn := r.requests[p.domain.Name]; !isIn {
+			r.requests[p.domain.Name] = *r._newReq()
 		}
+		req := r.requests[p.domain.Name]
+		p.sendSigReq(r, &req)
 		r.blooms._sendBloom(p)
 	})
 }
