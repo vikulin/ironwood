@@ -36,6 +36,8 @@ Potential showstopping issue (long term):
 
 */
 
+const routerUnknownLatency = time.Duration(^uint32(0))
+
 type peerdomain struct {
 	peers  map[*peer]struct{}
 	domain types.Domain
@@ -58,7 +60,7 @@ type router struct {
 	timers     map[types.Name]*time.Timer
 	ancs       map[types.Name][]types.Domain // Peer ancestry info
 	cache      map[types.Name][]peerPort     // Cache path slice for each peer
-	costs      map[*peer]uint64
+	lags       map[*peer]time.Duration       // Latency for a given *peer to respond with a valid sigres, exponentially weighted average
 	requests   map[types.Name]routerSigReq
 	responses  map[types.Name]routerDomainSigRes
 	responded  map[*peer]struct{}
@@ -81,7 +83,7 @@ func (r *router) init(c *core) {
 	r.timers = make(map[types.Name]*time.Timer)
 	r.ancs = make(map[types.Name][]types.Domain)
 	r.cache = make(map[types.Name][]peerPort)
-	r.costs = make(map[*peer]uint64)
+	r.lags = make(map[*peer]time.Duration)
 	r.requests = make(map[types.Name]routerSigReq)
 	r.responses = make(map[types.Name]routerDomainSigRes)
 	r.responded = make(map[*peer]struct{})
@@ -149,7 +151,7 @@ func (r *router) addPeer(from phony.Actor, p *peer) {
 			peers:  peer,
 			domain: p.domain,
 		}
-		r.costs[p] = uint64(^uint32(0)) // High enough but not high enough to overflow uint64
+		r.lags[p] = routerUnknownLatency
 		if _, isIn := r.requests[p.domain.Name]; !isIn {
 			r.requests[p.domain.Name] = *r._newReq()
 		}
@@ -165,7 +167,7 @@ func (r *router) removePeer(from phony.Actor, p *peer) {
 		//r._resetCache()
 		ps := r.peers[p.domain.Name].peers
 		delete(ps, p)
-		delete(r.costs, p)
+		delete(r.lags, p)
 		if len(ps) == 0 {
 			delete(r.peers, p.domain.Name)
 			delete(r.sent, p.domain.Name)
@@ -233,6 +235,10 @@ func (r *router) _updateAncestries() {
 	}
 }
 
+func (r *router) _getCost(p *peer) uint64 {
+	return uint64(r.lags[p].Milliseconds())
+}
+
 func (r *router) _fix() {
 	bestRoot := r.core.crypto.Domain
 	bestParent := r.core.crypto.Domain
@@ -246,7 +252,7 @@ func (r *router) _fix() {
 			for p := range r.peers[self.parent.Name].peers {
 				// Use the path to the root as our benchmark for parent selection
 				c := dists[root.Name]
-				if co := r.costs[p]; co > 0 {
+				if co := r._getCost(p); co > 0 {
 					c *= co
 				}
 				if c < cost {
@@ -271,7 +277,7 @@ func (r *router) _fix() {
 		for p := range r.peers[pk].peers {
 			// Use the path to the root as our benchmark for parent selection
 			c := pDists[pRoot.Name]
-			if co := r.costs[p]; co > 0 {
+			if co := r._getCost(p); co > 0 {
 				c *= co
 			}
 			if c < cost {
@@ -445,17 +451,12 @@ func (r *router) _handleResponse(p *peer, res *routerSigRes, rtt time.Duration) 
 	}
 	if _, isIn := r.responded[p]; !isIn && r.requests[p.domain.Name] == res.routerSigReq {
 		r.responded[p] = struct{}{}
-		c := r.costs[p]
-		cost := time.Duration(c) * time.Millisecond // use cost as duration in milliseconds
-		if c == uint64(^uint32(0)) {
-			cost = rtt
+		lag := r.lags[p]
+		if lag == routerUnknownLatency {
+			lag = rtt
 		}
-		cost = cost*7/8 + rtt/8
-		ms := cost.Milliseconds()
-		if ms < 1 {
-			ms = 1
-		}
-		r.costs[p] = uint64(ms)
+		lag = lag*3/4 + rtt/4
+		r.lags[p] = lag
 	}
 }
 
@@ -741,7 +742,7 @@ func (r *router) _lookup(path []peerPort, watermark *uint64) *peer {
 	}
 	for _, p := range candidates {
 		dist := r._getDist(path, p.domain)
-		if co := uint64(r.costs[p]); co > 0 {
+		if co := r._getCost(p); co > 0 {
 			dist *= co
 		}
 		switch {
