@@ -57,7 +57,8 @@ type router struct {
 	infos      map[types.Name]routerInfo
 	timers     map[types.Name]*time.Timer
 	ancs       map[types.Name][]types.Domain // Peer ancestry info
-	cache      map[types.Name][]peerPort // Cache path slice for each peer
+	cache      map[types.Name][]peerPort     // Cache path slice for each peer
+	costs      map[*peer]uint64
 	requests   map[types.Name]routerSigReq
 	responses  map[types.Name]routerDomainSigRes
 	resSeqs    map[types.Name]uint64
@@ -79,6 +80,7 @@ func (r *router) init(c *core) {
 	r.timers = make(map[types.Name]*time.Timer)
 	r.ancs = make(map[types.Name][]types.Domain)
 	r.cache = make(map[types.Name][]peerPort)
+	r.costs = make(map[*peer]uint64)
 	r.requests = make(map[types.Name]routerSigReq)
 	r.responses = make(map[types.Name]routerDomainSigRes)
 	r.resSeqs = make(map[types.Name]uint64)
@@ -145,7 +147,7 @@ func (r *router) addPeer(from phony.Actor, p *peer) {
 			peers:  peer,
 			domain: p.domain,
 		}
-
+		r.costs[p] = uint64(^uint32(0)) // High enough but not high enough to overflow uint64
 		if _, isIn := r.requests[p.domain.Name]; !isIn {
 			r.requests[p.domain.Name] = *r._newReq()
 		}
@@ -160,6 +162,7 @@ func (r *router) removePeer(from phony.Actor, p *peer) {
 		//r._resetCache()
 		ps := r.peers[p.domain.Name].peers
 		delete(ps, p)
+		delete(r.costs, p)
 		if len(ps) == 0 {
 			delete(r.peers, p.domain.Name)
 			delete(r.sent, p.domain.Name)
@@ -436,8 +439,9 @@ func (r *router) _useResponse(peerKey types.Domain, res *routerDomainSigRes) boo
 	return false
 }
 
-func (r *router) handleResponse(from phony.Actor, p *peer, res *routerSigRes) {
+func (r *router) handleResponse(from phony.Actor, p *peer, res *routerSigRes, cost uint64) {
 	r.Act(from, func() {
+		r.costs[p] = cost
 		r._handleResponse(p, res)
 	})
 }
@@ -696,30 +700,27 @@ func (r *router) _lookup(path []peerPort, watermark *uint64) *peer {
 		return bestPeer != nil && key.TreeLess(bestPeer.domain)
 	}
 	for _, p := range candidates {
-		dist := r._getDist(path, p.domain) + uint64(p.cost)
+		dist := r._getDist(path, p.domain) * uint64(r.costs[p])
 		switch {
 		case bestPeer == nil:
-			fallthrough
+			// Start with the first candidate to try & improve upon.
+			bestPeer, bestDist = p, dist
+		case p.domain.Equal(bestPeer.domain) && p.prio < bestPeer.prio:
+			// If the key is the same, select the link with the lowest priority.
+			bestPeer, bestDist = p, dist
+		case p.domain.Equal(bestPeer.domain) && p.prio > bestPeer.prio:
+			// If the key is the same, ignore links with higher priorities.
+			continue
 		case dist < bestDist, dist == bestDist && tiebreak(p.domain):
 			// We're either closer to the destination, or we're the same
 			// distance but we've selected the lower key for consistency.
-			bestPeer = p
-			bestDist = dist
+			bestPeer, bestDist = p, dist
 		case dist > bestDist:
 			// This is here so that by the next case, dist == bestDist.
 			continue
-		case p.prio < bestPeer.prio:
-			// Next, select the link with the lowest priority.
-			bestPeer = p
-			bestDist = dist
-		case p.prio > bestPeer.prio:
-			// This is here so that by the next case, p.prio == bestPeer.prio.
-			continue
 		case p.order < bestPeer.order:
-			// Next, if the priority is equal, select the link that has been
-			// up the longest.
-			bestPeer = p
-			bestDist = dist
+			// If all else is equal, pick the peer that has been up the longest.
+			bestPeer, bestDist = p, dist
 		}
 	}
 	return bestPeer

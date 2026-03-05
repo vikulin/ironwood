@@ -77,12 +77,18 @@ func (d *Debug) GetSelf() (info DebugSelfInfo) {
 }
 
 func (d *Debug) GetPeers() (infos []DebugPeerInfo) {
+	costs := map[*peer]uint64{}
+	phony.Block(&d.c.router, func() {
+		for p, c := range d.c.router.costs {
+			costs[p] = c
+		}
+	})
 	phony.Block(&d.c.peers, func() {
 		for _, peers := range d.c.peers.peers {
 			for peer := range peers {
 				var info DebugPeerInfo
 				info.Port = uint64(peer.port)
-				info.Cost = uint64(peer.cost)
+				info.Cost = uint64(costs[peer])
 				info.Domain = types.Domain(peer.domain)
 				info.Priority = peer.prio
 				info.Conn = peer.conn
