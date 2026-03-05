@@ -31,33 +31,42 @@ func main() {
 			log.Println(http.ListenAndServe(*pprof, nil))
 		}()
 	}
-	_, key, _ := ed25519.GenerateKey(nil)
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	domain := iwt.NewDomain("", pub)
 	var pc iwt.PacketConn
 	var opts []iwn.Option
 	var doNotify2 func(key ed25519.PublicKey)
 	doNotify1 := func(key ed25519.PublicKey) {
 		doNotify2(key)
 	}
-	opts = append(opts, iwn.WithBloomTransform(transformKey))
-	opts = append(opts, iwn.WithPathNotify(doNotify1))
+	opts = append(opts, iwn.WithBloomTransform(func(key iwt.Domain) iwt.Domain {
+		var newKey iwt.PublicKey
+		copy(newKey[:], transformKey(key.Key[:]))
+		return iwt.Domain{Name: key.Name, Key: newKey}
+	}))
+	opts = append(opts, iwn.WithPathNotify(func(key iwt.Domain) {
+		doNotify1(key.Key[:])
+	}))
 	if *enc && *sign {
 		panic("TODO a useful error message (can't use both -unenc and -sign)")
 	} else if *enc {
-		pc, _ = iwc.NewPacketConn(key, opts...)
+		pc, _ = iwc.NewPacketConn(priv, domain, opts...)
 	} else if *sign {
-		pc, _ = iws.NewPacketConn(key, opts...)
+		pc, _ = iws.NewPacketConn(priv, domain, opts...)
 	} else {
-		pc, _ = iwn.NewPacketConn(key, opts...)
+		pc, _ = iwn.NewPacketConn(priv, domain, opts...)
 	}
 	defer pc.Close()
 	doNotify2 = func(key ed25519.PublicKey) {
-		putKey(key)
-		flushBuffer(pc, key) // Ugly hack, we need the pc for flushBuffer to work
+		domain := iwt.NewDomain("", key)
+		putKey(domain)
+		flushBuffer(pc, domain) // Ugly hack, we need the pc for flushBuffer to work
 	}
 	// get address and pc.SetOutOfBandHandler
 	localAddr := pc.LocalAddr()
-	pubKey := ed25519.PublicKey(localAddr.(iwt.Addr))
-	addrBytes := getAddr(pubKey)
+	addr := localAddr.(iwt.Addr)
+	pubKey := addr.Key[:]
+	addrBytes, _ := getAddr(iwt.Domain(addr))
 	// open tun/tap and assign address
 	ip := net.IP(addrBytes[:])
 	fmt.Println("Our IP address is", ip.String())

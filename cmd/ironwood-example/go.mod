@@ -6,6 +6,7 @@ replace github.com/Arceliar/ironwood => ../../
 
 require (
 	github.com/Arceliar/ironwood v0.0.0-00010101000000-000000000000
+	github.com/eknkc/basex v1.0.0
 	github.com/vishvananda/netlink v1.1.0
 	golang.org/x/net v0.21.0
 	golang.org/x/sys v0.20.0
