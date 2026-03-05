@@ -128,6 +128,7 @@ type blooms struct {
 type bloomInfo struct {
 	send   bloom
 	recv   bloom
+	seq    uint16 // used to force a filter to resend once/hour in _sendAllBlooms, TODO something better
 	onTree bool
 	zDirty bool
 }
@@ -270,8 +271,9 @@ func (bs *blooms) _sendAllBlooms() {
 		if !pbi.onTree {
 			continue
 		}
+		pbi.seq++
 		keepOnes := !pbi.zDirty
-		if b, isNew := bs._getBloomFor(k, keepOnes); isNew {
+		if b, isNew := bs._getBloomFor(k, keepOnes); isNew || pbi.seq >= 3600 {
 			if ps, isIn := bs.router.peers[k]; isIn {
 				for p := range ps.peers {
 					p.sendBloom(bs.router, b)
@@ -279,7 +281,9 @@ func (bs *blooms) _sendAllBlooms() {
 			} else {
 				panic("this should never happen")
 			}
+			pbi.seq = 0
 		}
+		bs.blooms[k] = pbi
 	}
 }
 
