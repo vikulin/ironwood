@@ -26,15 +26,6 @@ func wireChopSlice(out []byte, data *[]byte) bool {
 	return true
 }
 
-/*func wireChopSlice(out []byte, data *[]byte) bool {
-	if len(*data) < len(out) {
-		return false
-	}
-	copy(out, (*data)[:len(out)]) // Copy only the required bytes from *data
-	*data = (*data)[len(out):]
-	return true
-}*/
-
 func wireChopBytes(out *[]byte, data *[]byte, size int) bool {
 	if len(*data) < size {
 		return false
@@ -94,7 +85,7 @@ func wireAppendPath(dest []byte, path []peerPort) []byte {
 	return dest
 }
 
-func wireDecodePath(source []byte) (path []peerPort, length int) {
+func wireDecodePath(path []peerPort, source []byte) ([]peerPort, int) {
 	bs := source
 	for {
 		var u uint64
@@ -106,12 +97,13 @@ func wireDecodePath(source []byte) (path []peerPort, length int) {
 		}
 		path = append(path, peerPort(u))
 	}
-	length = len(source) - len(bs)
-	return
+	length := len(source) - len(bs)
+	return path, length
 }
 
 func wireChopPath(out *[]peerPort, data *[]byte) bool {
-	path, length := wireDecodePath(*data)
+	var _path [128]peerPort
+	path, length := wireDecodePath(_path[:0], *data)
 	if length < 0 {
 		return false
 	}

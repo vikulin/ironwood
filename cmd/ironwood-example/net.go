@@ -97,7 +97,7 @@ func mcListener(mc *ipv6.PacketConn, key ed25519.PublicKey, pc iwt.PacketConn) {
 		}
 		go func() {
 			destKey := ed25519.PublicKey(bs[:n])
-			destKeyString := iwt.Addr(destKey).String()
+			destKeyString := iwt.Addr(iwt.NewDomain("", destKey)).String()
 			tcpAddr := new(net.TCPAddr)
 			uAddr := from.(*net.UDPAddr)
 			tcpAddr.IP = uAddr.IP
@@ -124,7 +124,8 @@ func mcListener(mc *ipv6.PacketConn, key ed25519.PublicKey, pc iwt.PacketConn) {
 func handleTCP(pc iwt.PacketConn, conn net.Conn) {
 	defer conn.Close()
 	localAddr := pc.LocalAddr()
-	pubKey := ed25519.PublicKey(localAddr.(iwt.Addr))
+	addr := localAddr.(iwt.Addr)
+	pubKey := addr.Key[:]
 	if _, err := conn.Write(pubKey); err != nil {
 		fmt.Println("Error writing our key:", err)
 		return
@@ -135,7 +136,7 @@ func handleTCP(pc iwt.PacketConn, conn net.Conn) {
 		fmt.Println("Error reading remote key:", err)
 		return
 	}
-	destKeyString := iwt.Addr(there).String() // TODO? check this against key from UDP announcement
+	destKeyString := iwt.Addr(iwt.NewDomain("", there)).String() // TODO? check this against key from UDP announcement
 	connectionsMutex.Lock()
 	if _, isIn := connections[destKeyString]; isIn {
 		connectionsMutex.Unlock()
@@ -143,15 +144,14 @@ func handleTCP(pc iwt.PacketConn, conn net.Conn) {
 	}
 	connections[destKeyString] = conn
 	connectionsMutex.Unlock()
-	addrBytes := make([]byte, 16)
-	addrBytes[0] = 0xfd
-	copy(addrBytes[1:], there)
-	for idx := 1; idx < len(addrBytes); idx++ {
-		addrBytes[idx] = ^addrBytes[idx]
+	destDomain := iwt.NewDomain("", there)
+	addrBytes, ok := getAddr(destDomain)
+	if !ok {
+		return
 	}
-	ip := net.IP(addrBytes)
+	ip := net.IP(addrBytes[:])
 	fmt.Println("Connected to", ip.String())
-	if err := pc.HandleConn(there, conn, 0); err != nil {
+	if err := pc.HandleConn(iwt.NewDomain("", there), conn, 0, 0); err != nil {
 		fmt.Println("Disconnected from", ip.String(), "due to:", err)
 	} else {
 		fmt.Println("Disconnected from", ip.String())

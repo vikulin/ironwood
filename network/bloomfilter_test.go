@@ -1,6 +1,10 @@
 package network
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/Arceliar/ironwood/types"
+)
 
 func TestBloom(t *testing.T) {
 	b := newBloom()
@@ -19,7 +23,7 @@ func TestBloom(t *testing.T) {
 	}
 	// Intermedaite value test, add some keys
 	buf = buf[:0]
-	var k publicKey
+	var k types.Name
 	b.addKey(k)
 	for idx := 0; idx < len(k); idx++ {
 		k[idx] = ^k[idx]

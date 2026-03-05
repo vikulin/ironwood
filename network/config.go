@@ -1,8 +1,9 @@
 package network
 
 import (
-	"crypto/ed25519"
 	"time"
+
+	"github.com/Arceliar/ironwood/types"
 )
 
 type config struct {
@@ -11,8 +12,8 @@ type config struct {
 	peerKeepAliveDelay time.Duration
 	peerTimeout        time.Duration
 	peerMaxMessageSize uint64
-	bloomTransform     func(ed25519.PublicKey) ed25519.PublicKey
-	pathNotify         func(ed25519.PublicKey)
+	bloomTransform     func(types.Domain) types.Domain
+	pathNotify         func(types.Domain)
 	pathTimeout        time.Duration
 	pathThrottle       time.Duration
 }
@@ -26,8 +27,8 @@ func configDefaults() Option {
 		c.peerKeepAliveDelay = time.Second
 		c.peerTimeout = 3 * time.Second
 		c.peerMaxMessageSize = 1048576 // 1 megabyte
-		c.bloomTransform = func(key ed25519.PublicKey) ed25519.PublicKey { return key }
-		c.pathNotify = func(key ed25519.PublicKey) {}
+		c.bloomTransform = func(key types.Domain) types.Domain { return key }
+		c.pathNotify = func(key types.Domain) {}
 		c.pathTimeout = time.Minute
 		c.pathThrottle = time.Second
 	}
@@ -63,13 +64,13 @@ func WithPeerMaxMessageSize(size uint64) Option {
 	}
 }
 
-func WithBloomTransform(xform func(key ed25519.PublicKey) ed25519.PublicKey) Option {
+func WithBloomTransform(xform func(key types.Domain) types.Domain) Option {
 	return func(c *config) {
 		c.bloomTransform = xform
 	}
 }
 
-func WithPathNotify(notify func(key ed25519.PublicKey)) Option {
+func WithPathNotify(notify func(key types.Domain)) Option {
 	return func(c *config) {
 		c.pathNotify = notify
 	}

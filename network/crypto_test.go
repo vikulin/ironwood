@@ -8,46 +8,46 @@ import (
 )
 
 func TestSign(t *testing.T) {
-	var c crypto
+	var c types.Crypto
 	_, priv, _ := ed25519.GenerateKey(nil)
 	d := types.Domain{}
-	c.init(priv, d)
+	c.Init(priv, d)
 	msg := []byte("this is a test")
-	_ = c.privateKey.sign(msg)
+	_ = c.PrivateKey.Sign(msg)
 }
 
 func TestVerify(t *testing.T) {
-	var c crypto
+	var c types.Crypto
 	pub, priv, _ := ed25519.GenerateKey(nil)
-	d := types.Domain(newDomain("verify", pub))
-	c.init(priv, d)
+	d := types.NewDomain("verify", pub)
+	c.Init(priv, d)
 	msg := []byte("this is a test")
-	sig := c.privateKey.sign(msg)
-	if !c.domain.verify(msg, &sig) {
+	sig := c.PrivateKey.Sign(msg)
+	if !c.Domain.Verify(msg, &sig) {
 		panic("verification failed")
 	}
 }
 
 func BenchmarkSign(b *testing.B) {
-	var c crypto
+	var c types.Crypto
 	_, priv, _ := ed25519.GenerateKey(nil)
 	d := types.Domain{}
-	c.init(priv, d)
+	c.Init(priv, d)
 	msg := []byte("this is a test")
 	for idx := 0; idx < b.N; idx++ {
-		_ = c.privateKey.sign(msg)
+		_ = c.PrivateKey.Sign(msg)
 	}
 }
 
 func BenchmarkVerify(b *testing.B) {
-	var c crypto
+	var c types.Crypto
 	pub, priv, _ := ed25519.GenerateKey(nil)
-	d := types.Domain(newDomain("verify", pub))
-	c.init(priv, d)
+	d := types.NewDomain("verify", pub)
+	c.Init(priv, d)
 	msg := []byte("this is a test")
-	sig := c.privateKey.sign(msg)
+	sig := c.PrivateKey.Sign(msg)
 	for idx := 0; idx < b.N; idx++ {
-		if !c.domain.verify(msg, &sig) {
+		if !c.Domain.Verify(msg, &sig) {
 			panic("verification failed")
 		}
 	}

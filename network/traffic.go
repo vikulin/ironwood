@@ -9,16 +9,16 @@ import "github.com/Arceliar/ironwood/types"
 type traffic struct {
 	path      []peerPort // *not* zero terminated
 	from      []peerPort
-	source    domain
-	dest      domain
+	source    types.Domain
+	dest      types.Domain
 	watermark uint64
 	payload   []byte
 }
 
 func newTraffic() traffic {
 	tr := new(traffic)
-	tr.source = initDomain()
-	tr.dest = initDomain()
+	tr.source = types.InitDomain()
+	tr.dest = types.InitDomain()
 	return *tr
 }
 
@@ -27,8 +27,8 @@ func (tr *traffic) copyFrom(original *traffic) {
 	*tr = *original
 	tr.path = append(tmp.path[:0], tr.path...)
 	tr.from = append(tmp.from[:0], tr.from...)
-	tr.source = domain(tmp.source)
-	tr.dest = domain(tmp.dest)
+	tr.source = types.Domain(tmp.source)
+	tr.dest = types.Domain(tmp.dest)
 	tr.watermark = tmp.watermark
 	tr.payload = append(tmp.payload[:0], tr.payload...)
 }
@@ -92,10 +92,10 @@ func (tr *traffic) wireType() wirePacketType {
 	return wireTraffic
 }
 
-func (tr *traffic) sourceKey() publicKey {
-	return tr.source.publicKey()
+func (tr *traffic) sourceKey() types.Domain {
+	return tr.source
 }
 
-func (tr *traffic) destKey() publicKey {
-	return tr.dest.publicKey()
+func (tr *traffic) destKey() types.Domain {
+	return tr.dest
 }

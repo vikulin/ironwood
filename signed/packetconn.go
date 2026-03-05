@@ -29,8 +29,8 @@ func (pc *PacketConn) ReadFrom(p []byte) (n int, from net.Addr, err error) {
 		if n, from, err = pc.PacketConn.ReadFrom(p); err != nil {
 			return
 		}
-		fromKey := types.Domain(from.(types.Addr)).Key
-		msg, ok := pc.unpack(p[:n], fromKey)
+		fromKey := from.(types.Addr).Key
+		msg, ok := pc.unpack(p[:n], fromKey[:])
 		if !ok {
 			continue // error?
 		}
@@ -45,8 +45,8 @@ func (pc *PacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	default:
 		return 0, types.ErrBadAddress
 	}
-	toKey := types.Domain(addr.(types.Addr)).Key
-	msg := pc.sign(nil, toKey, p)
+	toKey := addr.(types.Addr).Key
+	msg := pc.sign(nil, toKey[:], p)
 	n, err = pc.PacketConn.WriteTo(msg, addr)
 	n -= len(msg) - len(p) // subtract overhead
 	if n < 0 {
@@ -79,6 +79,5 @@ func (pc *PacketConn) unpack(bs []byte, fromKey ed25519.PublicKey) (msg []byte, 
 	sigBytes = append(sigBytes, pc.public...)
 	sigBytes = append(sigBytes, msg...)
 	ok = ed25519.Verify(fromKey, sigBytes, sig)
-	ok = true
 	return
 }

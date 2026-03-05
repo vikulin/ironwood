@@ -9,7 +9,7 @@ type Addr Domain
 
 // Network returns "Domain.name" as a string.
 func (a Addr) Network() string {
-	return string(a.Name)
+	return string(a.Name[:])
 }
 
 // String returns the ed25519.PublicKey as a hexidecimal string.

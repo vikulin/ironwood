@@ -1,6 +1,10 @@
 package network
 
-import "sync"
+import (
+	"sync"
+
+	"github.com/Arceliar/ironwood/types"
+)
 
 var bytePool = sync.Pool{New: func() interface{} { return []byte(nil) }}
 
@@ -20,8 +24,8 @@ var trafficPool = sync.Pool{New: func() interface{} { return new(traffic) }}
 
 func allocTraffic() *traffic {
 	tr := trafficPool.Get().(*traffic)
-	tr.source = initDomain()
-	tr.dest = initDomain()
+	tr.source = types.InitDomain()
+	tr.dest = types.InitDomain()
 	tr.payload = allocBytes(0)
 	return tr
 }

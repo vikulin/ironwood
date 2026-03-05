@@ -3,13 +3,15 @@ package network
 import (
 	"container/heap"
 	"time"
+
+	"github.com/Arceliar/ironwood/types"
 )
 
 type pqPacket interface {
 	wireEncodeable
 	wireType() wirePacketType
-	sourceKey() publicKey
-	destKey() publicKey
+	sourceKey() types.Domain
+	destKey() types.Domain
 }
 
 type pqPacketInfo struct {
@@ -19,13 +21,13 @@ type pqPacketInfo struct {
 }
 
 type pqSource struct {
-	key   publicKey
+	key   types.Domain
 	infos []pqPacketInfo
 	size  uint64
 }
 
 type pqDest struct {
-	key     publicKey
+	key     types.Domain
 	sources []pqSource
 	size    uint64
 }
@@ -94,13 +96,13 @@ func (q *packetQueue) push(packet pqPacket) {
 	sIdx, dIdx := -1, -1
 	source, dest := pqSource{key: sKey}, pqDest{key: dKey}
 	for idx, d := range q.dests {
-		if d.key.equal(dKey) {
+		if d.key.Equal(dKey) {
 			dIdx, dest = idx, d
 			break
 		}
 	}
 	for idx, s := range dest.sources {
-		if s.key.equal(sKey) {
+		if s.key.Equal(sKey) {
 			sIdx, source = idx, s
 			break
 		}

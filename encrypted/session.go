@@ -38,14 +38,14 @@ const (
 type sessionManager struct {
 	phony.Inbox
 	pc       *PacketConn
-	sessions map[edPub]*sessionInfo
-	buffers  map[edPub]*sessionBuffer
+	sessions map[types.Name]*sessionInfo
+	buffers  map[types.Name]*sessionBuffer
 }
 
 func (mgr *sessionManager) init(pc *PacketConn) {
 	mgr.pc = pc
-	mgr.sessions = make(map[edPub]*sessionInfo)
-	mgr.buffers = make(map[edPub]*sessionBuffer)
+	mgr.sessions = make(map[types.Name]*sessionInfo)
+	mgr.buffers = make(map[types.Name]*sessionBuffer)
 }
 
 func (mgr *sessionManager) _newSession(domain types.Domain, recv, send boxPub, seq uint64) *sessionInfo {
@@ -54,18 +54,18 @@ func (mgr *sessionManager) _newSession(domain types.Domain, recv, send boxPub, s
 		info.mgr = mgr
 		info._resetTimer()
 	})
-	mgr.sessions[edPub(info.domain.Key)] = info
+	mgr.sessions[info.domain.Name] = info
 	return info
 }
 
 func (mgr *sessionManager) _sessionForInit(domain types.Domain, init *sessionInit) (*sessionInfo, *sessionBuffer) {
 	var info *sessionInfo
 	var buf *sessionBuffer
-	if info = mgr.sessions[edPub(domain.Key)]; info == nil {
+	if info = mgr.sessions[domain.Name]; info == nil {
 		info = mgr._newSession(domain, init.current, init.next, init.seq)
-		if buf = mgr.buffers[edPub(domain.Key)]; buf != nil {
+		if buf = mgr.buffers[domain.Name]; buf != nil {
 			buf.timer.Stop()
-			delete(mgr.buffers, edPub(domain.Key))
+			delete(mgr.buffers, domain.Name)
 			info.sendPub, info.sendPriv = buf.init.current, buf.currentPriv
 			info.nextPub, info.nextPriv = buf.init.next, buf.nextPriv
 			info._fixShared(0, 0)
@@ -84,13 +84,13 @@ func (mgr *sessionManager) handleData(from phony.Actor, domain types.Domain, dat
 		case sessionTypeDummy:
 		case sessionTypeInit:
 			init := new(sessionInit)
-			if init.decrypt(&mgr.pc.secretBox, (*edPub)(domain.Key), data) {
+			if init.decrypt(&mgr.pc.secretBox, (*edPub)(domain.Key[:]), data) {
 				mgr._handleInit(domain, init)
 			}
 			freeBytes(data)
 		case sessionTypeAck:
 			ack := new(sessionAck)
-			if ack.decrypt(&mgr.pc.secretBox, (*edPub)(domain.Key), data) {
+			if ack.decrypt(&mgr.pc.secretBox, (*edPub)(domain.Key[:]), data) {
 				mgr._handleAck(domain, ack)
 			}
 			freeBytes(data)
@@ -111,7 +111,7 @@ func (mgr *sessionManager) _handleInit(domain types.Domain, init *sessionInit) {
 }
 
 func (mgr *sessionManager) _handleAck(domain types.Domain, ack *sessionAck) {
-	_, isOld := mgr.sessions[edPub(domain.Key)]
+	_, isOld := mgr.sessions[domain.Name]
 	if info, buf := mgr._sessionForInit(domain, &ack.sessionInit); info != nil {
 		if isOld {
 			info.handleAck(mgr, ack)
@@ -125,7 +125,7 @@ func (mgr *sessionManager) _handleAck(domain types.Domain, ack *sessionAck) {
 }
 
 func (mgr *sessionManager) _handleTraffic(domain types.Domain, msg []byte) {
-	if info := mgr.sessions[edPub(domain.Key)]; info != nil {
+	if info := mgr.sessions[domain.Name]; info != nil {
 		info.doRecv(mgr, msg)
 	} else {
 		// We don't know that the node really exists, it could be spoofed/replay
@@ -140,8 +140,9 @@ func (mgr *sessionManager) _handleTraffic(domain types.Domain, msg []byte) {
 }
 
 func (mgr *sessionManager) writeTo(toDomain types.Domain, msg []byte) {
-	mgr.Act(nil, func() {
-		if info := mgr.sessions[edPub(toDomain.Key)]; info != nil {
+	// WARNING: unsafe to call from within an actor, must only be exposed over the PacketConn functions (which are, themselves, unsafe for actors to call in most cases, since they may block)
+	phony.Block(mgr, func() {
+		if info := mgr.sessions[toDomain.Name]; info != nil {
 			info.doSend(mgr, msg)
 		} else {
 			// Need to buffer the traffic
@@ -152,7 +153,7 @@ func (mgr *sessionManager) writeTo(toDomain types.Domain, msg []byte) {
 
 func (mgr *sessionManager) _bufferAndInit(toDomain types.Domain, msg []byte) {
 	var buf *sessionBuffer
-	if buf = mgr.buffers[edPub(toDomain.Key)]; buf == nil {
+	if buf = mgr.buffers[toDomain.Name]; buf == nil {
 		// Create a new buffer (including timer)
 		buf = new(sessionBuffer)
 		currentPub, currentPriv := newBoxKeys()
@@ -161,29 +162,29 @@ func (mgr *sessionManager) _bufferAndInit(toDomain types.Domain, msg []byte) {
 		buf.currentPriv = currentPriv
 		buf.nextPriv = nextPriv
 		buf.timer = time.AfterFunc(0, func() {})
-		mgr.buffers[edPub(toDomain.Key)] = buf
+		mgr.buffers[toDomain.Name] = buf
 	}
 	buf.data = msg
 	buf.timer.Stop()
 	mgr.sendInit(toDomain, &buf.init)
 	buf.timer = time.AfterFunc(sessionTimeout, func() {
 		mgr.Act(nil, func() {
-			if b := mgr.buffers[edPub(toDomain.Key)]; b == buf {
+			if b := mgr.buffers[toDomain.Name]; b == buf {
 				b.timer.Stop()
-				delete(mgr.buffers, edPub(toDomain.Key))
+				delete(mgr.buffers, toDomain.Name)
 			}
 		})
 	})
 }
 
 func (mgr *sessionManager) sendInit(toDomain types.Domain, init *sessionInit) {
-	if bs, err := init.encrypt(&mgr.pc.secretEd, (*edPub)(toDomain.Key)); err == nil {
+	if bs, err := init.encrypt(&mgr.pc.secretEd, (*edPub)(toDomain.Key[:])); err == nil {
 		mgr.pc.PacketConn.WriteTo(bs, types.Addr(toDomain))
 	}
 }
 
 func (mgr *sessionManager) sendAck(toDomain types.Domain, ack *sessionAck) {
-	if bs, err := ack.encrypt(&mgr.pc.secretEd, (*edPub)(toDomain.Key)); err == nil {
+	if bs, err := ack.encrypt(&mgr.pc.secretEd, (*edPub)(toDomain.Key[:])); err == nil {
 		mgr.pc.PacketConn.WriteTo(bs, types.Addr(toDomain))
 	}
 }
@@ -206,7 +207,7 @@ type sessionInfo struct {
 	recvPub      boxPub
 	recvShared   boxShared
 	recvNonce    uint64
-	sendPriv     boxPriv // becomes recvPriv when we rachet forward
+	sendPriv     boxPriv // becomes recvPriv when we ratchet forward
 	sendPub      boxPub  // becomes recvPub
 	sendShared   boxShared
 	sendNonce    uint64
@@ -216,8 +217,12 @@ type sessionInfo struct {
 	ack          *sessionAck
 	since        time.Time
 	rotated      time.Time // last time we rotated keys
-	rx           uint64
-	tx           uint64
+	rx              uint64
+	tx              uint64
+	nextSendShared  boxShared
+	nextSendNonce   uint64
+	nextRecvShared  boxShared
+	nextRecvNonce   uint64
 }
 
 func newSession(domain types.Domain, current, next boxPub, seq uint64) *sessionInfo {
@@ -237,7 +242,10 @@ func newSession(domain types.Domain, current, next boxPub, seq uint64) *sessionI
 func (info *sessionInfo) _fixShared(recvNonce, sendNonce uint64) {
 	getShared(&info.recvShared, &info.current, &info.recvPriv)
 	getShared(&info.sendShared, &info.current, &info.sendPriv)
+	getShared(&info.nextSendShared, &info.next, &info.sendPriv)
+	getShared(&info.nextRecvShared, &info.next, &info.recvPriv)
 	info.recvNonce, info.sendNonce = recvNonce, sendNonce
+	info.nextSendNonce, info.nextRecvNonce = 0, 0
 }
 
 func (info *sessionInfo) _resetTimer() {
@@ -246,8 +254,8 @@ func (info *sessionInfo) _resetTimer() {
 	}
 	info.timer = time.AfterFunc(sessionTimeout, func() {
 		info.mgr.Act(nil, func() {
-			if oldInfo := info.mgr.sessions[edPub(info.domain.Key)]; oldInfo == info {
-				delete(info.mgr.sessions, edPub(info.domain.Key))
+			if oldInfo := info.mgr.sessions[info.domain.Name]; oldInfo == info {
+				delete(info.mgr.sessions, info.domain.Name)
 			}
 		})
 	})
@@ -367,41 +375,53 @@ func (info *sessionInfo) doRecv(from phony.Actor, msg []byte) {
 			}
 		case fromNext && toSend:
 			// The remote side appears to have ratcheted forward
-			sharedKey = new(boxShared)
-			getShared(sharedKey, &info.next, &info.sendPriv)
+			if !(info.nextSendNonce < nonce) {
+				return
+			}
+			sharedKey = &info.nextSendShared
 			onSuccess = func(innerKey boxPub) {
-				// Rotate their keys
-				info.current = info.next
-				info.next = innerKey
-				info.remoteKeySeq++ // = remoteKeySeq
-				// Rotate our own keys
-				info.recvPub, info.recvPriv = info.sendPub, info.sendPriv
-				info.sendPub, info.sendPriv = info.nextPub, info.nextPriv
-				info.localKeySeq++
-				// Generate new next keys
-				info.nextPub, info.nextPriv = newBoxKeys()
-				// Update nonces
-				info._fixShared(nonce, 0)
+				info.nextSendNonce = nonce
+				if info.rotated.IsZero() || time.Since(info.rotated) > time.Minute {
+					// Rotate their keys
+					info.current = info.next
+					info.next = innerKey
+					info.remoteKeySeq++ // = remoteKeySeq
+					// Rotate our own keys
+					info.recvPub, info.recvPriv = info.sendPub, info.sendPriv
+					info.sendPub, info.sendPriv = info.nextPub, info.nextPriv
+					info.localKeySeq++
+					// Generate new next keys
+					info.nextPub, info.nextPriv = newBoxKeys()
+					// Update nonces
+					info._fixShared(nonce, 0)
+					info.rotated = time.Now()
+				}
 			}
 		case fromNext && toRecv:
 			// The remote side appears to have ratcheted forward early
 			// Technically there's no reason we can't handle this
 			//panic("DEBUG") // TODO test this
-			sharedKey = new(boxShared)
-			getShared(sharedKey, &info.next, &info.recvPriv)
+			if !(info.nextRecvNonce < nonce) {
+				return
+			}
+			sharedKey = &info.nextRecvShared
 			onSuccess = func(innerKey boxPub) {
-				// Rotate their keys
-				info.current = info.next
-				info.next = innerKey
-				info.remoteKeySeq++ // = remoteKeySeq
-				// Rotate our own keys
-				info.recvPub, info.recvPriv = info.sendPub, info.sendPriv
-				info.sendPub, info.sendPriv = info.nextPub, info.nextPriv
-				info.localKeySeq++
-				// Generate new next keys
-				info.nextPub, info.nextPriv = newBoxKeys()
-				// Update nonces
-				info._fixShared(nonce, 0)
+				info.nextRecvNonce = nonce
+				if info.rotated.IsZero() || time.Since(info.rotated) > time.Minute {
+					// Rotate their keys
+					info.current = info.next
+					info.next = innerKey
+					info.remoteKeySeq++ // = remoteKeySeq
+					// Rotate our own keys
+					info.recvPub, info.recvPriv = info.sendPub, info.sendPriv
+					info.sendPub, info.sendPriv = info.nextPub, info.nextPriv
+					info.localKeySeq++
+					// Generate new next keys
+					info.nextPub, info.nextPriv = newBoxKeys()
+					// Update nonces
+					info._fixShared(nonce, 0)
+					info.rotated = time.Now()
+				}
 			}
 		default:
 			// We can't make sense of their message
@@ -411,17 +431,14 @@ func (info *sessionInfo) doRecv(from phony.Actor, msg []byte) {
 		}
 		// Decrypt and handle packet
 		unboxed, ok := allocBytes(0), false
-		defer freeBytes(unboxed)
+		defer func() { freeBytes(unboxed) }()
 		if unboxed, ok = boxOpen(unboxed, msg, nonce, sharedKey); ok {
 			var key boxPub
 			copy(key[:], unboxed)
 			msg := append(allocBytes(0), unboxed[len(key):]...)
 			info.mgr.pc.network.recv(info, msg)
 			// Misc remaining followup work
-			if info.rotated.IsZero() || time.Since(info.rotated) > time.Minute {
-				onSuccess(key)
-				info.rotated = time.Now()
-			}
+			onSuccess(key)
 			info.rx += uint64(len(msg))
 			info._resetTimer()
 		} else {

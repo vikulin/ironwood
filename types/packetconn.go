@@ -24,5 +24,5 @@ type PacketConn interface {
 	MTU() uint64
 
 	// SendLookup sends a lookup for a given (possibly partial) key.
-	SendLookup(target ed25519.PublicKey)
+	SendLookup(target Domain)
 }

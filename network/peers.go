@@ -22,16 +22,17 @@ type peers struct {
 	phony.Inbox // Used to create/remove peers
 	core        *core
 	ports       map[peerPort]struct{}
-	peers       map[publicKey]map[*peer]struct{}
+	peers       map[types.Name]map[*peer]struct{}
+	order       uint64 // global counter for (*peer).order
 }
 
 func (ps *peers) init(c *core) {
 	ps.core = c
 	ps.ports = make(map[peerPort]struct{})
-	ps.peers = make(map[publicKey]map[*peer]struct{})
+	ps.peers = make(map[types.Name]map[*peer]struct{})
 }
 
-func (ps *peers) addPeer(domain domain, conn net.Conn, prio uint8) (*peer, error) {
+func (ps *peers) addPeer(domain types.Domain, conn net.Conn, prio uint8) (*peer, error) {
 	var p *peer
 	var err error
 	ps.core.pconn.closeMutex.Lock()
@@ -43,7 +44,7 @@ func (ps *peers) addPeer(domain domain, conn net.Conn, prio uint8) (*peer, error
 	}
 	phony.Block(ps, func() {
 		var port peerPort
-		if keyPeers, isIn := ps.peers[domain.publicKey()]; isIn {
+		if keyPeers, isIn := ps.peers[domain.Name]; isIn {
 			for p := range keyPeers {
 				port = p.port
 				break
@@ -58,7 +59,7 @@ func (ps *peers) addPeer(domain domain, conn net.Conn, prio uint8) (*peer, error
 				break
 			}
 			ps.ports[port] = struct{}{}
-			ps.peers[domain.publicKey()] = make(map[*peer]struct{})
+			ps.peers[domain.Name] = make(map[*peer]struct{})
 		}
 		p = new(peer)
 		p.peers = ps
@@ -71,8 +72,9 @@ func (ps *peers) addPeer(domain domain, conn net.Conn, prio uint8) (*peer, error
 		p.monitor.pDelay = ps.core.config.peerTimeout // It doesn't make sense to start the ping delay any shorter than this
 		p.writer.peer = p
 		p.writer.wbuf = bufio.NewWriter(p.conn)
-		p.time = time.Now()
-		ps.peers[p.domain.publicKey()][p] = struct{}{}
+		p.order = ps.order
+		ps.order++
+		ps.peers[p.domain.Name][p] = struct{}{}
 	})
 	return p, err
 }
@@ -80,13 +82,13 @@ func (ps *peers) addPeer(domain domain, conn net.Conn, prio uint8) (*peer, error
 func (ps *peers) removePeer(p *peer) error {
 	var err error
 	phony.Block(ps, func() {
-		kps := ps.peers[p.domain.publicKey()]
+		kps := ps.peers[p.domain.Name]
 		if _, isIn := kps[p]; !isIn {
 			err = types.ErrPeerNotFound
 		} else {
 			delete(kps, p)
 			if len(kps) == 0 {
-				delete(ps.peers, p.domain.publicKey())
+				delete(ps.peers, p.domain.Name)
 				delete(ps.ports, p.port)
 			}
 		}
@@ -99,14 +101,16 @@ type peer struct {
 	peers       *peers
 	conn        net.Conn
 	done        chan struct{}
-	domain      domain
+	domain      types.Domain
 	port        peerPort
 	prio        uint8
 	queue       packetQueue
-	time        time.Time // time when the peer was initialized
+	order       uint64 // order in which peers were connected (relative uptime)
 	monitor     peerMonitor
 	writer      peerWriter
-	ready       bool // is the writer ready for traffic?
+	ready       bool      // is the writer ready for traffic?
+	srst        time.Time // sigReq send time
+	srrt        time.Time // sigRes receive time
 }
 
 type peerMonitor struct {
@@ -193,7 +197,7 @@ func (w *peerWriter) _write(bs []byte, pType wirePacketType) {
 	})
 }
 
-func (w *peerWriter) sendPacket(pType wirePacketType, data wireEncodeable) {
+func (w *peerWriter) sendPacket(pType wirePacketType, data wireEncodeable, done func()) {
 	w.Act(nil, func() {
 		bufSize := uint64(data.size() + 1)
 		if bufSize > w.peer.peers.core.config.peerMaxMessageSize {
@@ -214,6 +218,9 @@ func (w *peerWriter) sendPacket(pType wirePacketType, data wireEncodeable) {
 			freeTraffic(tr)
 		default:
 			// Not a special case, don't free anything
+		}
+		if done != nil {
+			w.peer.Act(w, done)
 		}
 	})
 }
@@ -293,9 +300,9 @@ func (p *peer) _handlePacket(bs []byte) error {
 	}
 }
 
-func (p *peer) sendDirect(from phony.Actor, pType wirePacketType, data wireEncodeable) {
+func (p *peer) sendDirect(from phony.Actor, pType wirePacketType, data wireEncodeable, done func()) {
 	p.Act(from, func() {
-		p.writer.sendPacket(pType, data)
+		p.writer.sendPacket(pType, data, done)
 	})
 }
 
@@ -309,7 +316,9 @@ func (p *peer) _handleSigReq(bs []byte) error {
 }
 
 func (p *peer) sendSigReq(from phony.Actor, req *routerSigReq) {
-	p.sendDirect(from, wireProtoSigReq, req)
+	p.sendDirect(from, wireProtoSigReq, req, func() {
+		p.srst = time.Now()
+	})
 }
 
 func (p *peer) _handleSigRes(bs []byte) error {
@@ -317,15 +326,17 @@ func (p *peer) _handleSigRes(bs []byte) error {
 	if err := res.decode(bs); err != nil {
 		return err
 	}
-	if !res.check(p.peers.core.crypto.publicKey, p.domain.publicKey()) {
+	if !res.check(p.peers.core.crypto.Domain, p.domain) {
 		return types.ErrBadMessage
 	}
-	p.peers.core.router.handleResponse(p, p, res)
+	p.srrt = time.Now()
+	rtt := p.srrt.Sub(p.srst)
+	p.peers.core.router.handleResponse(p, p, res, rtt)
 	return nil
 }
 
 func (p *peer) sendSigRes(from phony.Actor, res *routerSigRes) {
-	p.sendDirect(from, wireProtoSigRes, res)
+	p.sendDirect(from, wireProtoSigRes, res, nil)
 }
 
 func (p *peer) _handleAnnounce(bs []byte) error {
@@ -341,7 +352,7 @@ func (p *peer) _handleAnnounce(bs []byte) error {
 }
 
 func (p *peer) sendAnnounce(from phony.Actor, ann *routerAnnounce) {
-	p.sendDirect(from, wireProtoAnnounce, ann)
+	p.sendDirect(from, wireProtoAnnounce, ann, nil)
 }
 
 func (p *peer) _handleBloom(bs []byte) error {
@@ -354,7 +365,7 @@ func (p *peer) _handleBloom(bs []byte) error {
 }
 
 func (p *peer) sendBloom(from phony.Actor, b *bloom) {
-	p.sendDirect(from, wireProtoBloomFilter, b)
+	p.sendDirect(from, wireProtoBloomFilter, b, nil)
 }
 
 func (p *peer) _handlePathLookup(bs []byte) error {
@@ -415,7 +426,7 @@ func (p *peer) sendQueued(from phony.Actor, packet pqPacket) {
 
 func (p *peer) _push(packet pqPacket) {
 	if p.ready {
-		p.writer.sendPacket(packet.wireType(), packet)
+		p.writer.sendPacket(packet.wireType(), packet, nil)
 		p.ready = false
 		return
 	}
@@ -432,7 +443,7 @@ func (p *peer) _push(packet pqPacket) {
 func (p *peer) pop() {
 	p.Act(nil, func() {
 		if info, ok := p.queue.pop(); ok {
-			p.writer.sendPacket(info.packet.wireType(), info.packet)
+			p.writer.sendPacket(info.packet.wireType(), info.packet, nil)
 		} else {
 			p.ready = true
 			p.writer.Act(nil, func() {

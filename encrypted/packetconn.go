@@ -22,7 +22,7 @@ type PacketConn struct {
 
 // NewPacketConn returns a *PacketConn struct which implements the types.PacketConn interface.
 func NewPacketConn(secret ed25519.PrivateKey, domain types.Domain, options ...network.Option) (*PacketConn, error) {
-	npc, err := network.NewPacketConn(secret, domain)
+	npc, err := network.NewPacketConn(secret, domain, options...)
 	if err != nil {
 		return nil, err
 	}
@@ -42,8 +42,11 @@ func (pc *PacketConn) ReadFrom(p []byte) (n int, from net.Addr, err error) {
 		err = info.err
 		return
 	}
-	// info.from.asKey()
-	n, from = len(info.data), types.Addr(info.from)
+	f := types.Domain{
+		Key:  info.from.Key,
+		Name: info.from.Name,
+	}
+	n, from = len(info.data), types.Addr(f)
 	if n > len(p) {
 		n = len(p)
 	}
@@ -59,13 +62,14 @@ func (pc *PacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	default:
 	}
 	dest, ok := addr.(types.Addr)
-	destDomain := types.Domain(dest)
-	if !ok || len(destDomain.Key) != edPubSize {
+	if !ok || len(dest.Key) != edPubSize {
 		return 0, types.ErrBadAddress
 	}
 	if uint64(len(p)) > pc.MTU() {
 		return 0, types.ErrOversizedMessage
 	}
+	destDomain := types.Domain(dest)
+	n = len(p)
 	pc.sessions.writeTo(destDomain, append(allocBytes(0), p...))
 	return
 }
