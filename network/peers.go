@@ -111,7 +111,6 @@ type peer struct {
 	ready       bool      // is the writer ready for traffic?
 	srst        time.Time // sigReq send time
 	srrt        time.Time // sigRes receive time
-	ewma        float64   // Exponential weighted moving average of RTT from srst/srrt in milliseconds
 }
 
 type peerMonitor struct {

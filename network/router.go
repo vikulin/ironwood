@@ -236,7 +236,12 @@ func (r *router) _updateAncestries() {
 }
 
 func (r *router) _getCost(p *peer) uint64 {
-	return uint64(r.lags[p].Milliseconds())
+	// Note that cost needs to be non-zero, used in multiplication and division
+	c := uint64(r.lags[p].Milliseconds())
+	if c == 0 {
+		c = 1
+	}
+	return c
 }
 
 func (r *router) _fix() {
@@ -251,10 +256,7 @@ func (r *router) _fix() {
 			cost := ^uint64(0)
 			for p := range r.peers[self.parent.Name].peers {
 				// Use the path to the root as our benchmark for parent selection
-				c := dists[root.Name]
-				if co := r._getCost(p); co > 0 {
-					c *= co
-				}
+				c := dists[root.Name] * r._getCost(p)
 				if c < cost {
 					cost = c
 				}
@@ -276,10 +278,7 @@ func (r *router) _fix() {
 		cost := ^uint64(0)
 		for p := range r.peers[pk].peers {
 			// Use the path to the root as our benchmark for parent selection
-			c := pDists[pRoot.Name]
-			if co := r._getCost(p); co > 0 {
-				c *= co
-			}
+			c := pDists[pRoot.Name] * r._getCost(p)
 			if c < cost {
 				cost = c
 			}
@@ -734,6 +733,7 @@ func (r *router) _lookup(path []peerPort, watermark *uint64) *peer {
 	// Then take a look at the candidates and work out which is the best
 	// tree distance, accounting for the link cost.
 	bestPeer = nil
+	selfDist := bestDist
 	bestDist = ^uint64(0)
 	tiebreak := func(key types.Domain) bool {
 		// If distances match, keep the peer with the lowest key, just so
@@ -741,30 +741,36 @@ func (r *router) _lookup(path []peerPort, watermark *uint64) *peer {
 		return bestPeer != nil && key.TreeLess(bestPeer.domain)
 	}
 	for _, p := range candidates {
-		dist := r._getDist(path, p.domain)
-		if co := r._getCost(p); co > 0 {
-			dist *= co
+		// We want to minimize cost per distance traveled towards the destination.
+		// If cost == latency, this is the same as maximizing velocity in treespace towards the destination.
+		peerDist := r._getDist(path, p.domain)
+		delta := selfDist - peerDist
+		var cpd uint64
+		if delta <= 0 {
+			cpd = ^uint64(0)
+		} else {
+			cpd = r._getCost(p) / delta
 		}
 		switch {
 		case bestPeer == nil:
 			// Start with the first candidate to try & improve upon.
-			bestPeer, bestDist = p, dist
+			bestPeer, bestDist = p, cpd
 		case p.domain.Equal(bestPeer.domain) && p.prio < bestPeer.prio:
 			// If the key is the same, select the link with the lowest priority.
-			bestPeer, bestDist = p, dist
+			bestPeer, bestDist = p, cpd
 		case p.domain.Equal(bestPeer.domain) && p.prio > bestPeer.prio:
 			// If the key is the same, ignore links with higher priorities.
 			continue
-		case dist < bestDist, dist == bestDist && tiebreak(p.domain):
+		case cpd < bestDist, cpd == bestDist && tiebreak(p.domain):
 			// We're either closer to the destination, or we're the same
 			// distance but we've selected the lower key for consistency.
-			bestPeer, bestDist = p, dist
-		case dist > bestDist:
-			// This is here so that by the next case, dist == bestDist.
+			bestPeer, bestDist = p, cpd
+		case cpd > bestDist:
+			// This is here so that by the next case, cpd == bestDist.
 			continue
 		case p.order < bestPeer.order:
 			// If all else is equal, pick the peer that has been up the longest.
-			bestPeer, bestDist = p, dist
+			bestPeer, bestDist = p, cpd
 		}
 	}
 	return bestPeer
