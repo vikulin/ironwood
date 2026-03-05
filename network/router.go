@@ -737,43 +737,48 @@ func (r *router) _lookup(path []peerPort, watermark *uint64) *peer {
 	// tree distance, accounting for the link cost.
 	bestPeer = nil
 	selfDist := bestDist
+	bestCPD := ^uint64(0)
 	bestDist = ^uint64(0)
-	tiebreak := func(key types.Domain) bool {
-		// If distances match, keep the peer with the lowest key, just so
-		// there's some kind of consistency
-		return bestPeer != nil && key.TreeLess(bestPeer.domain)
-	}
 	for _, p := range candidates {
 		// We want to minimize cost per distance traveled towards the destination.
 		// If cost == latency, this is the same as maximizing velocity in treespace towards the destination.
-		peerDist := r._getDist(path, p.domain)
-		delta := selfDist - peerDist
+		dist := r._getDist(path, p.domain)
+		delta := selfDist - dist
 		var cpd uint64
 		if delta <= 0 {
 			cpd = ^uint64(0)
 		} else {
 			cpd = r._getCost(p) / delta
 		}
+		accept := func() {
+			bestPeer, bestCPD, bestDist = p, cpd, dist
+		}
 		switch {
 		case bestPeer == nil:
 			// Start with the first candidate to try & improve upon.
-			bestPeer, bestDist = p, cpd
+			accept()
 		case p.domain.Equal(bestPeer.domain) && p.prio < bestPeer.prio:
 			// If the key is the same, select the link with the lowest priority.
-			bestPeer, bestDist = p, cpd
+			accept()
 		case p.domain.Equal(bestPeer.domain) && p.prio > bestPeer.prio:
 			// If the key is the same, ignore links with higher priorities.
 			continue
-		case cpd < bestDist, cpd == bestDist && tiebreak(p.domain):
-			// We're either closer to the destination, or we're the same
-			// distance but we've selected the lower key for consistency.
-			bestPeer, bestDist = p, cpd
-		case cpd > bestDist:
-			// This is here so that by the next case, cpd == bestDist.
+		case cpd < bestCPD:
+			// Costed distance is better.
+			accept()
+		case cpd > bestCPD:
+			// Costed distance is worse.
+			continue
+		case dist < bestDist:
+			// Costed distance is the same but the tree distance is better.
+			accept()
+		case dist > bestDist:
+			// Costed distance is the same but tree distance is worse.
 			continue
 		case p.order < bestPeer.order:
-			// If all else is equal, pick the peer that has been up the longest.
-			bestPeer, bestDist = p, cpd
+			// Both costed distance and tree distance are the same, so pick
+			// the peer that has been up the longest.
+			accept()
 		}
 	}
 	return bestPeer
